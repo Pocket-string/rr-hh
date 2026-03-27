@@ -1,0 +1,2 @@
+[    3920ms] [WARNING] [Fast Refresh] performing full reload because your application had an unrecoverable error @ http://localhost:3000/_next/static/chunks/12ox_next_dist_0u5rn~.._.js:2431
+[   43259ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3000/api/employees?is_active=true:0

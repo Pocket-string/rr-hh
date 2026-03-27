@@ -1,0 +1,14 @@
+[    6580ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3000/api/employees?is_active=true:0
+[    6595ms] TypeError: employees.map is not a function
+    at EmployeeList (http://localhost:3000/_next/static/chunks/src_0zz.fjh._.js:220:49)
+    at Object.react_stack_bottom_frame (http://localhost:3000/_next/static/chunks/12ox_next_dist_compiled_react-dom_0may8.p._.js:15037:24)
+    at renderWithHooks (http://localhost:3000/_next/static/chunks/12ox_next_dist_compiled_react-dom_0may8.p._.js:4620:24)
+    at updateFunctionComponent (http://localhost:3000/_next/static/chunks/12ox_next_dist_compiled_react-dom_0may8.p._.js:6081:21)
+    at beginWork (http://localhost:3000/_next/static/chunks/12ox_next_dist_compiled_react-dom_0may8.p._.js:6691:24)
+    at runWithFiberInDEV (http://localhost:3000/_next/static/chunks/12ox_next_dist_compiled_react-dom_0may8.p._.js:965:74)
+    at performUnitOfWork (http://localhost:3000/_next/static/chunks/12ox_next_dist_compiled_react-dom_0may8.p._.js:9555:97)
+    at workLoopSync (http://localhost:3000/_next/static/chunks/12ox_next_dist_compiled_react-dom_0may8.p._.js:9449:40)
+    at renderRootSync (http://localhost:3000/_next/static/chunks/12ox_next_dist_compiled_react-dom_0may8.p._.js:9433:13)
+    at performWorkOnRoot (http://localhost:3000/_next/static/chunks/12ox_next_dist_compiled_react-dom_0may8.p._.js:9098:47)
+    at performWorkOnRootViaSchedulerTask (http://localhost:3000/_next/static/chunks/12ox_next_dist_compiled_react-dom_0may8.p._.js:10255:9)
+    at MessagePort.performWorkUntilDeadline (http://localhost:3000/_next/static/chunks/12ox_next_dist_compiled_0r~z2~5._.js:2647:64)

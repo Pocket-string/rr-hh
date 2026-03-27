@@ -1,0 +1,2 @@
+[   17548ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3000/api/employees/df302a17-5507-468f-adc2-825499fb52fc:0
+[   17776ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3000/api/employees/df302a17-5507-468f-adc2-825499fb52fc:0

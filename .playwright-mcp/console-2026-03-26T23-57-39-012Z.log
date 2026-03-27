@@ -1,0 +1,1 @@
+[     526ms] [ERROR] Error fetching employees: {code: PGRST201, details: Array(2), hint: Try changing 'departments' to one of the following…nd the desired relationship in the 'details' key., message: Could not embed because more than one relationship was found for 'employees' and 'departments'} @ http://localhost:3000/_next/static/chunks/12ox_next_dist_0u5rn~.._.js:3272
