@@ -4,7 +4,7 @@ description: |
   Deploy completo con Docker + Dokploy + Traefik en VPS.
   Multi-stage Dockerfile optimizado para Next.js 16, Docker Compose con HTTPS automatico,
   cache management, SSH setup, y health checks.
-  Validado en produccion con LinkedIn ContentOps + Soiling Calculator en VPS con Dokploy.
+  Validado en produccion con LinkedIn ContentOps + Soiling Calculator + RRHH Peixos Puignau en VPS con Dokploy.
 allowed-tools:
   - bash
   - read
@@ -32,9 +32,13 @@ Cada modulo ha sido validado en produccion real con multiples proyectos.
 4. **`output: 'standalone'` es obligatorio** — Sin esto, el Docker runner necesita todo node_modules (~500MB+). Con standalone, el runner pesa ~80-120MB.
 5. **`mkdir -p public` en Dockerfile** — Next.js standalone falla si `/public` no existe, incluso si esta vacio.
 6. **NODE_OPTIONS max-old-space-size** — VPS pequenos (2-4GB RAM) necesitan limitar memoria del build. Usar 384-512MB.
-7. **NEXT_PUBLIC_* se inyectan en build-time** — Deben ser ARGs en el Dockerfile, no solo env vars en runtime. Las env vars normales (server-side) se inyectan en runtime.
+7. **NEXT_PUBLIC_* requieren ARG + ENV en Dockerfile** — Solo `ARG` no basta. Necesitas `ENV VAR=$VAR` despues de cada `ARG` para que `next build` los vea. Las env vars normales (server-side) se inyectan en runtime.
 8. **Deploy DESPUES de migracion** — El orden es: `apply_migration` -> deploy. Nunca al reves o tendras runtime crashes.
 9. **SSH con alias desde dia 0** — Configurar `~/.ssh/config` con alias + key dedicada. Perder acceso SSH al VPS es catastrofico.
+10. **Lockfile DEBE estar en git** — Verificar que `package-lock.json` o `pnpm-lock.yaml` NO esten en `.gitignore`. Docker build falla con `not found` si falta el lockfile.
+11. **`experimental.mcpServer` solo en development** — Next.js 16 con `mcpServer: true` causa problemas en standalone production. Usar `mcpServer: process.env.NODE_ENV === 'development'`.
+12. **Cloudflare Proxied bloquea Let's Encrypt HTTP-01** — Con Cloudflare en Proxied (nube naranja), el challenge de Let's Encrypt no llega al VPS. Solucion: DNS only temporalmente para emitir cert, luego volver a Proxied. Ver Modulo 7.
+13. **Dockerfile simplificado > multi-stage complejo** — 2 etapas (builder + runner) es suficiente. El patron base→deps→builder→runner con 4 stages añade complejidad sin beneficio real.
 
 ---
 
@@ -47,10 +51,11 @@ Usa AskUserQuestion con multiSelect:true para preguntar:
 Opciones:
 1. **Dockerfile + next.config.ts (Recomendado)** — Multi-stage build optimizado para Next.js + pnpm
 2. **Docker Compose** — Orquestacion con Traefik reverse proxy + HTTPS automatico
-3. **Dokploy Config** — Configuracion especifica para Dokploy (alternativa a Compose manual)
+3. **Dokploy Config + MCP** — Configuracion y deploy automatizado via Dokploy MCP
 4. **Cache + Logs Management** — Cron para docker builder prune + log rotation
 5. **SSH Setup** — Alias + key dedicada + sudoers passwordless
 6. **Health Checks** — Endpoint /api/health + Docker HEALTHCHECK
+7. **Cloudflare DNS + SSL** — Setup Cloudflare con Dokploy/Traefik
 
 Si el usuario dice "all" o "todo", aplica todos los modulos.
 
@@ -67,6 +72,10 @@ import type { NextConfig } from 'next'
 const nextConfig: NextConfig = {
   output: 'standalone',
   poweredByHeader: false,
+  // MCP server solo en desarrollo (rompe standalone en produccion)
+  experimental: {
+    mcpServer: process.env.NODE_ENV === 'development',
+  },
   async headers() {
     return [
       {
@@ -100,37 +109,30 @@ export default nextConfig
 > **NOTA**: Si usas AI (OpenRouter, Gemini, OpenAI), agregar dominios a `connect-src`:
 > `https://openrouter.ai https://generativelanguage.googleapis.com https://api.openai.com`
 
-### 1.2 Dockerfile — Multi-stage optimizado
+### 1.2 Dockerfile — pnpm (Recomendado)
 
 ```dockerfile
-# --- Base ---
-FROM node:20-alpine AS base
-RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
-
-# --- Dependencies ---
-FROM base AS deps
-WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile && \
-    pnpm store prune 2>/dev/null || true
-
 # --- Builder ---
-FROM base AS builder
+FROM node:20-alpine AS builder
+RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
 
-# Next.js standalone necesita /public (incluso vacio)
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+COPY . .
 RUN mkdir -p public
 
-# Build-time env vars (NEXT_PUBLIC_* se inyectan en build)
+# Build-time env vars: ARG + ENV para que next build los vea
 ARG NEXT_PUBLIC_SUPABASE_URL
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
 ARG NEXT_PUBLIC_SITE_URL
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
+ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
 
 # Limitar memoria para VPS pequenos (ajustar segun RAM disponible)
 ENV NODE_OPTIONS="--max-old-space-size=512"
-
 RUN pnpm run build
 
 # --- Runner (imagen minima de produccion) ---
@@ -146,6 +148,10 @@ RUN addgroup --system --gid 1001 nodejs && \
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
 
 USER nextjs
 EXPOSE 3000
@@ -164,6 +170,7 @@ node_modules
 .env
 .env.local
 .env*.local
+.env.production
 *.md
 .vscode
 .claude
@@ -174,6 +181,9 @@ __tests__
 *.test.tsx
 *.spec.ts
 *.spec.tsx
+playwright-report
+test-results
+e2e
 ```
 
 ### 1.4 Variante: npm en vez de pnpm
@@ -181,25 +191,22 @@ __tests__
 Si el proyecto usa npm en vez de pnpm:
 
 ```dockerfile
-# --- Base ---
-FROM node:20-alpine AS base
-
-# --- Dependencies ---
-FROM base AS deps
+# --- Builder ---
+FROM node:20-alpine AS builder
 WORKDIR /app
+
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# --- Builder ---
-FROM base AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN mkdir -p public
 
 ARG NEXT_PUBLIC_SUPABASE_URL
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
 ARG NEXT_PUBLIC_SITE_URL
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
+ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
 
 ENV NODE_OPTIONS="--max-old-space-size=512"
 RUN npm run build
@@ -216,12 +223,27 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
+
 USER nextjs
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
 CMD ["node", "server.js"]
+```
+
+### 1.5 Pre-check: Lockfile en git
+
+**CRITICO**: Antes de crear el Dockerfile, verificar que el lockfile no este en `.gitignore`:
+
+```bash
+# Verificar
+grep -n "package-lock.json\|pnpm-lock.yaml" .gitignore
+
+# Si aparece, eliminarlo del .gitignore y agregar al repo:
+git add package-lock.json  # o pnpm-lock.yaml
 ```
 
 ---
@@ -344,16 +366,17 @@ Dokploy es una alternativa a Docker Compose manual. Gestiona builds, deployments
      NEXT_PUBLIC_SUPABASE_ANON_KEY = eyJ...
      NEXT_PUBLIC_SITE_URL = https://myapp.example.com
    - Environment variables (runtime):
-     SUPABASE_SERVICE_ROLE_KEY = eyJ...
-     RESEND_API_KEY = re_xxxxx
+     NEXT_PUBLIC_SUPABASE_URL = https://xxxxx.supabase.co
+     NEXT_PUBLIC_SUPABASE_ANON_KEY = eyJ...
+     HOSTNAME = 0.0.0.0
+     PORT = 3000
 4. Dominio:
    - Agregar dominio personalizado
    - Habilitar HTTPS (Let's Encrypt automatico)
-   - Redirect HTTP -> HTTPS
+   - Port: 3000
 5. Advanced:
    - Clean cache: OFF (solo activar si cambian deps)
    - Health check path: /api/health
-   - Port: 3000
 ```
 
 ### 3.2 Gotchas de Dokploy
@@ -365,6 +388,77 @@ Dokploy es una alternativa a Docker Compose manual. Gestiona builds, deployments
 - El path /admin/ esta reservado por Traefik. NUNCA usar /admin/ en tus rutas de Next.js.
 - Build args en Dokploy se pasan automaticamente al Dockerfile ARG.
 - Si el build falla por memoria, reducir NODE_OPTIONS max-old-space-size.
+- Environment variables en Dokploy van TANTO en buildArgs como en env (runtime).
+  Las NEXT_PUBLIC_* necesitan estar en buildArgs para el build y en env para el runtime.
+```
+
+### 3.3 Dokploy MCP Workflow (Automatizado)
+
+Flujo completo para deploy via Dokploy MCP sin tocar la UI:
+
+```
+1. Listar proyectos existentes:
+   mcp__dokploy__project-all
+
+2. Crear aplicacion en environment existente:
+   mcp__dokploy__application-create
+     name: "mi-app"
+     environmentId: "<id-del-environment>"
+
+3. Configurar Git provider:
+   mcp__dokploy__application-saveGitProvider
+     applicationId: "<id>"
+     customGitUrl: "https://github.com/org/repo.git"
+     customGitBranch: "master"
+     enableSubmodules: false
+
+4. Configurar build type (Dockerfile):
+   mcp__dokploy__application-update
+     applicationId: "<id>"
+     buildType: "dockerfile"
+     dockerfile: "./Dockerfile"
+     dockerContextPath: "."
+     sourceType: "git"
+
+5. Configurar environment variables + build args:
+   mcp__dokploy__application-saveEnvironment
+     applicationId: "<id>"
+     env: "NEXT_PUBLIC_SUPABASE_URL=...\nNEXT_PUBLIC_SUPABASE_ANON_KEY=...\nHOSTNAME=0.0.0.0\nPORT=3000"
+     buildArgs: "NEXT_PUBLIC_SUPABASE_URL=...\nNEXT_PUBLIC_SUPABASE_ANON_KEY=..."
+
+6. Crear dominio con HTTPS:
+   mcp__dokploy__domain-create
+     host: "app.example.com"
+     https: true
+     certificateType: "letsencrypt"
+     stripPath: false
+     applicationId: "<id>"
+     domainType: "application"
+     port: 3000
+     path: "/"
+
+7. Lanzar deploy:
+   mcp__dokploy__application-deploy
+     applicationId: "<id>"
+     title: "Initial deploy"
+
+8. Monitorear estado:
+   mcp__dokploy__application-one
+     applicationId: "<id>"
+   → Verificar applicationStatus: "done"
+```
+
+### 3.4 Troubleshooting Dokploy
+
+```markdown
+- Deploy falla en < 5 segundos: Problema de git clone o lockfile missing.
+  Verificar que el repo es accesible y el lockfile esta en git.
+- applicationStatus "error" sin errorMessage: Revisar logs en Dokploy UI
+  (Deployments → click en deploy → ver log completo).
+- 404 en todas las rutas: Next.js standalone no genero rutas.
+  Verificar que mcpServer no esta en true, y que el build completo sin errores.
+- Container arranca pero Traefik no rutea (502): Problema de SSL.
+  Ver Modulo 7 para configuracion Cloudflare.
 ```
 
 ---
@@ -580,7 +674,7 @@ export async function GET() {
 
 ### 6.3 Docker HEALTHCHECK en Dockerfile
 
-Agregar al final del Dockerfile (antes de CMD):
+Ya incluido en los Dockerfiles del Modulo 1. Aqui esta aislado:
 
 ```dockerfile
 # Health check
@@ -588,22 +682,60 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
 ```
 
-### 6.4 Docker Compose health check
+> **Por que `wget` y no `curl`?** — La imagen `node:20-alpine` incluye `wget` pero NO `curl`. Usar `wget --spider` para check sin descargar body.
 
-Ya incluido en el Modulo 2 (`docker-compose.yml`), pero aqui esta aislado:
+---
 
-```yaml
-services:
-  app:
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+## Modulo 7: Cloudflare DNS + SSL Setup
+
+### 7.1 El Problema
+
+Cloudflare Proxied (nube naranja) + Full (Strict) SSL intercepta el trafico.
+Let's Encrypt usa HTTP-01 challenge que necesita llegar directo al VPS.
+Si Cloudflare esta en medio, el challenge falla y no se emite el certificado.
+
+### 7.2 Procedimiento (Orden Exacto)
+
+```markdown
+1. En Cloudflare DNS:
+   - Crear registro A: subdominio → IP del VPS
+   - Proxy status: **DNS only** (nube gris)
+
+2. En Dokploy (via MCP o UI):
+   - Crear dominio con https: true, certificateType: "letsencrypt"
+   - Deploy o redeploy la aplicacion
+
+3. Esperar ~1-2 minutos para que Traefik obtenga el cert de Let's Encrypt
+
+4. Verificar que HTTPS funciona accediendo directo:
+   https://subdominio.example.com
+
+5. En Cloudflare DNS:
+   - Cambiar registro A a **Proxied** (nube naranja)
+
+6. Verificar que sigue funcionando con Cloudflare en medio:
+   https://subdominio.example.com
 ```
 
-> **Por que `wget` y no `curl`?** — La imagen `node:20-alpine` incluye `wget` pero NO `curl`. Usar `wget --spider` para check sin descargar body.
+### 7.3 Configuracion SSL Cloudflare
+
+```markdown
+- SSL/TLS Mode: Full (strict) — requiere cert valido en origin
+- Con Let's Encrypt + Traefik, el cert es valido y renovado automaticamente
+- Las otras apps del VPS NO se ven afectadas por este procedimiento
+  (solo se cambia el DNS del subdominio nuevo, no el modo SSL global)
+```
+
+### 7.4 Troubleshooting SSL
+
+```markdown
+| Sintoma | Causa | Solucion |
+|---------|-------|----------|
+| 502 Bad Gateway | Cloudflare Full Strict + no cert en origin | Procedimiento 7.2 (DNS only → cert → Proxied) |
+| 502 con DNS only | Traefik no tiene cert aun | Esperar 2 min, Let's Encrypt tarda en emitir |
+| 404 en todas las rutas | No es SSL, es Next.js standalone | Verificar mcpServer: false en prod, build exitoso |
+| ERR_SSL_VERSION_OR_CIPHER_MISMATCH | Cloudflare Proxied pero no hay cert | Cambiar SSL mode a Flexible temporalmente |
+```
 
 ---
 
@@ -611,16 +743,18 @@ services:
 
 1. **Preguntar** que modulos aplicar (multiSelect)
 2. **Detectar** package manager del proyecto (pnpm vs npm)
-3. **Verificar** que `next.config.ts` existe y agregar `output: 'standalone'`
-4. **Crear** archivos segun modulos seleccionados:
+3. **Verificar** que lockfile esta en git (no en .gitignore)
+4. **Verificar** que `next.config.ts` existe y agregar `output: 'standalone'` + `mcpServer` condicional
+5. **Crear** archivos segun modulos seleccionados:
    - Modulo 1: Dockerfile + .dockerignore + next.config.ts update
    - Modulo 2: docker-compose.yml + .env.production template
-   - Modulo 3: Instrucciones de Dokploy (no archivos)
+   - Modulo 3: Dokploy config (UI o MCP automatizado)
    - Modulo 4: Scripts de mantenimiento (instrucciones para VPS)
    - Modulo 5: Instrucciones SSH (ejecutar en local + VPS)
    - Modulo 6: src/app/api/health/route.ts + HEALTHCHECK en Dockerfile
-5. **Verificar** build local: `docker build -t test .`
-6. **Mostrar** resumen con proximos pasos
+   - Modulo 7: Instrucciones Cloudflare DNS + SSL
+6. **Verificar** build local: `docker build -t test .`
+7. **Mostrar** resumen con proximos pasos
 
 ---
 
@@ -628,22 +762,26 @@ services:
 
 ```markdown
 ## Pre-Deploy
+- [ ] Lockfile (pnpm-lock.yaml / package-lock.json) en git
 - [ ] Migraciones SQL aplicadas en Supabase
 - [ ] RLS habilitado en todas las tablas nuevas
 - [ ] `output: 'standalone'` en next.config.ts
-- [ ] .env.production configurado en VPS/Dokploy
+- [ ] `mcpServer` condicional a development
+- [ ] .env / build args configurados en Dokploy
 - [ ] Health check endpoint creado
 - [ ] .dockerignore actualizado
+- [ ] Cloudflare DNS en "DNS only" (para nuevo subdominio)
 
 ## Deploy
 - [ ] Build Docker exitoso
 - [ ] Container arranca sin errores
 - [ ] Health check responde 200
-- [ ] HTTPS activo (Let's Encrypt)
+- [ ] HTTPS activo (Let's Encrypt cert emitido)
 - [ ] Dominio resuelve correctamente
 
 ## Post-Deploy
-- [ ] Verificar funcionalidad en produccion
+- [ ] Cloudflare DNS cambiado a "Proxied"
+- [ ] Verificar funcionalidad via Cloudflare
 - [ ] Cron de limpieza Docker configurado
 - [ ] Log rotation configurado
 - [ ] SSH alias configurado para el equipo
@@ -657,23 +795,29 @@ services:
 Deploy configurado!
 
 Modulos aplicados:
-  [x] Dockerfile — Multi-stage build (4 etapas: base, deps, builder, runner)
+  [x] Dockerfile — 2-stage build (builder + runner) con pnpm
   [x] Docker Compose — Traefik + HTTPS automatico + log rotation
-  [x] Dokploy Config — Configuracion lista para Dokploy UI
+  [x] Dokploy Config — Configuracion lista (UI o MCP automatizado)
   [x] Cache + Logs — Cron diario de limpieza + daemon log rotation
   [x] SSH Setup — Key dedicada + alias + deployer user
   [x] Health Checks — /api/health + Docker HEALTHCHECK
+  [x] Cloudflare DNS — Setup SSL con DNS only → Proxied
 
 Gotchas recordar:
   - NUNCA /admin/ path (Traefik intercepta)
+  - Lockfile DEBE estar en git
+  - ARG + ENV para NEXT_PUBLIC_* en Dockerfile
+  - mcpServer: solo en development
   - cleanCache: OFF en Dokploy (solo si cambian deps)
   - Migracion ANTES de deploy, nunca al reves
+  - Cloudflare: DNS only para cert → Proxied despues
   - Cron diario de docker builder prune (30 deploys = 42.9GB)
   - SSH con alias desde dia 0
 
 Orden de deploy:
-  1. Aplicar migraciones SQL
-  2. Build + deploy Docker
-  3. Verificar health check
-  4. Verificar HTTPS
+  1. Cloudflare DNS only (nuevo subdominio)
+  2. Aplicar migraciones SQL
+  3. Build + deploy Docker
+  4. Verificar health check + HTTPS
+  5. Cloudflare Proxied
 ```
