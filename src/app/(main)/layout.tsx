@@ -22,6 +22,8 @@ const navSections = [
     title: 'Nominas',
     items: [
       { href: '/variables', label: 'Datos Variables', icon: '✎' },
+      { href: '/ic/generate', label: 'Generar IC', icon: '⊕' },
+      { href: '/ic/reconcile', label: 'Reconciliacion', icon: '⇄' },
       { href: '/upload', label: 'Subir IC', icon: '↑' },
       { href: '/ic', label: 'ICs Cargados', icon: '≡' },
     ],
