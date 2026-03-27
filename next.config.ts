@@ -3,9 +3,9 @@ import type { NextConfig } from 'next'
 const nextConfig: NextConfig = {
   output: 'standalone',
   poweredByHeader: false,
-  // Activa el MCP server en /_next/mcp (Next.js 16+)
+  // Activa el MCP server en /_next/mcp (solo dev)
   experimental: {
-    mcpServer: true,
+    mcpServer: process.env.NODE_ENV === 'development',
   },
   async headers() {
     return [
