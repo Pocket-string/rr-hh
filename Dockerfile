@@ -1,11 +1,12 @@
 # --- Base ---
 FROM node:20-alpine AS base
+RUN corepack enable && corepack prepare pnpm@latest --activate
 
 # --- Dependencies ---
 FROM base AS deps
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
 # --- Builder ---
 FROM base AS builder
@@ -21,7 +22,7 @@ ARG NEXT_PUBLIC_SITE_URL
 
 # Limitar memoria para VPS pequenos
 ENV NODE_OPTIONS="--max-old-space-size=512"
-RUN npm run build
+RUN pnpm run build
 
 # --- Runner (imagen minima de produccion) ---
 FROM node:20-alpine AS runner
