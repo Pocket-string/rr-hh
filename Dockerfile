@@ -1,49 +1,39 @@
-# --- Base ---
-FROM node:20-alpine AS base
+# --- Builder ---
+FROM node:20-alpine AS builder
 RUN corepack enable && corepack prepare pnpm@latest --activate
-
-# --- Dependencies ---
-FROM base AS deps
 WORKDIR /app
+
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
-# --- Builder ---
-FROM base AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN mkdir -p public
 
-# Build-time env vars (NEXT_PUBLIC_* se inyectan en build)
+# Build-time env vars
 ARG NEXT_PUBLIC_SUPABASE_URL
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
 ARG NEXT_PUBLIC_SITE_URL
 ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
 ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
-
-# Limitar memoria para VPS pequenos
 ENV NODE_OPTIONS="--max-old-space-size=512"
+
 RUN pnpm run build
 
-# --- Runner (imagen minima de produccion) ---
+# Debug: verify standalone output exists
+RUN ls -la .next/standalone/ && ls -la .next/standalone/.next/
+
+# --- Runner ---
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
-# Usuario no-root por seguridad
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-# Copiar SOLO standalone output + assets estaticos
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
 
 USER nextjs
 EXPOSE 3000
