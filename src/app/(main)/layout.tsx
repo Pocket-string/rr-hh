@@ -23,9 +23,9 @@ const navSections = [
     items: [
       { href: '/variables', label: 'Datos Variables', icon: '✎' },
       { href: '/ic/generate', label: 'Generar IC', icon: '⊕' },
-      { href: '/ic/reconcile', label: 'Reconciliacion', icon: '⇄' },
       { href: '/upload', label: 'Subir IC', icon: '↑' },
       { href: '/ic', label: 'ICs Cargados', icon: '≡' },
+      { href: '/ic/reconcile', label: 'Reconciliacion', icon: '⇄' },
     ],
   },
   {
@@ -60,7 +60,11 @@ export default function MainLayout({
               </p>
               <div className="mt-1 space-y-0.5">
                 {section.items.map((item) => {
-                  const isActive = pathname.startsWith(item.href)
+                  // Check if a more specific sibling route matches first
+                  const hasMoreSpecificMatch = section.items.some(
+                    (other) => other.href !== item.href && other.href.startsWith(item.href + '/') && (pathname === other.href || pathname.startsWith(other.href + '/'))
+                  )
+                  const isActive = !hasMoreSpecificMatch && (pathname === item.href || pathname.startsWith(item.href + '/'))
                   return (
                     <Link
                       key={item.href}
