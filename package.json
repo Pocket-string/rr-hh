@@ -12,7 +12,6 @@
     "@supabase/ssr": "^0.6.0",
     "@supabase/supabase-js": "^2.49.0",
     "@types/qrcode": "^1.5.6",
-    "mssql": "^12.2.1",
     "next": "^16.0.0",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
@@ -24,7 +23,6 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
-    "@types/mssql": "^9.1.11",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

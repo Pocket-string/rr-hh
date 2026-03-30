@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { parseICExcel } from '@/features/ic-upload/services/ic-parser'
-import { saveICToSqlServer } from '@/features/ic-upload/services/ic-storage'
+import { saveICToSupabase } from '@/features/ic-upload/services/ic-storage'
 
 export async function POST(request: NextRequest) {
   try {
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
     // TODO: obtener usuario autenticado de Supabase
     const createdBy = 'system'
 
-    const uploadId = await saveICToSqlServer(ic, createdBy)
+    const uploadId = await saveICToSupabase(ic, createdBy)
 
     return NextResponse.json({
       id: uploadId,
